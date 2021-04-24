@@ -1,0 +1,669 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" />
+    <title>spl.token.client &#8212; solana.py  documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../../_static/doctools.js"></script>
+    <script type="text/javascript" src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for spl.token.client</h1><div class="highlight"><pre>
+<span></span><span class="c1"># pylint: disable=too-many-arguments</span>
+<span class="sd">&quot;&quot;&quot;SPL Token program client.&quot;&quot;&quot;</span>
+<span class="kn">from</span> <span class="nn">__future__</span> <span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">NamedTuple</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">import</span> <span class="nn">solana.system_program</span> <span class="k">as</span> <span class="nn">sp</span>
+<span class="kn">import</span> <span class="nn">spl.token.instructions</span> <span class="k">as</span> <span class="nn">spl_token</span>
+<span class="kn">from</span> <span class="nn">solana.account</span> <span class="kn">import</span> <span class="n">Account</span>
+<span class="kn">from</span> <span class="nn">solana.publickey</span> <span class="kn">import</span> <span class="n">PublicKey</span>
+<span class="kn">from</span> <span class="nn">solana.rpc.api</span> <span class="kn">import</span> <span class="n">Client</span>
+<span class="kn">from</span> <span class="nn">solana.rpc.commitment</span> <span class="kn">import</span> <span class="n">Commitment</span><span class="p">,</span> <span class="n">Single</span>
+<span class="kn">from</span> <span class="nn">solana.rpc.types</span> <span class="kn">import</span> <span class="n">RPCResponse</span><span class="p">,</span> <span class="n">TokenAccountOpts</span><span class="p">,</span> <span class="n">TxOpts</span>
+<span class="kn">from</span> <span class="nn">solana.transaction</span> <span class="kn">import</span> <span class="n">Transaction</span>
+<span class="kn">from</span> <span class="nn">spl.token._layouts</span> <span class="kn">import</span> <span class="n">ACCOUNT_LAYOUT</span><span class="p">,</span> <span class="n">MINT_LAYOUT</span><span class="p">,</span> <span class="n">MULTISIG_LAYOUT</span>  <span class="c1"># type: ignore</span>
+
+
+<div class="viewcode-block" id="AccountInfo"><a class="viewcode-back" href="../../../spl.html#spl.token.client.AccountInfo">[docs]</a><span class="k">class</span> <span class="nc">AccountInfo</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Information about an account.&quot;&quot;&quot;</span>
+
+    <span class="n">mint</span><span class="p">:</span> <span class="n">PublicKey</span>
+    <span class="sd">&quot;&quot;&quot;The mint associated with this account.&quot;&quot;&quot;</span>
+    <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span>
+    <span class="sd">&quot;&quot;&quot;Owner of this account.&quot;&quot;&quot;</span>
+    <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="sd">&quot;&quot;&quot;Amount of tokens this account holds.&quot;&quot;&quot;</span>
+    <span class="n">delegate</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">PublicKey</span><span class="p">]</span>
+    <span class="sd">&quot;&quot;&quot;The delegate for this account.&quot;&quot;&quot;</span>
+    <span class="n">delegated_amount</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="sd">&quot;&quot;&quot;The amount of tokens the delegate authorized to the delegate.&quot;&quot;&quot;</span>
+    <span class="n">is_initialized</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="sd">&quot;&quot;&quot; Is this account initialized.&quot;&quot;&quot;</span>
+    <span class="n">is_frozen</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="sd">&quot;&quot;&quot;Is this account frozen.&quot;&quot;&quot;</span>
+    <span class="n">is_native</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="sd">&quot;&quot;&quot;Is this a native token account.&quot;&quot;&quot;</span>
+    <span class="n">rent_exempt_reserve</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span>
+    <span class="sd">&quot;&quot;&quot;If this account is a native token, it must be rent-exempt.</span>
+
+<span class="sd">    This value logs the rent-exempt reserve which must remain in the balance</span>
+<span class="sd">    until the account is closed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">close_authority</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">PublicKey</span><span class="p">]</span>
+    <span class="sd">&quot;&quot;&quot;Optional authority to close the account.&quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="MintInfo"><a class="viewcode-back" href="../../../spl.html#spl.token.client.MintInfo">[docs]</a><span class="k">class</span> <span class="nc">MintInfo</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Information about the mint.&quot;&quot;&quot;</span>
+
+    <span class="n">mint_authority</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">PublicKey</span><span class="p">]</span>
+    <span class="sd">&quot;&quot;&quot;&quot;Optional authority used to mint new tokens.</span>
+
+<span class="sd">    The mint authority may only be provided during mint creation. If no mint</span>
+<span class="sd">    authority is present then the mint has a fixed supply and no further tokens</span>
+<span class="sd">    may be minted.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">supply</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="sd">&quot;&quot;&quot;Total supply of tokens.&quot;&quot;&quot;</span>
+    <span class="n">decimals</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="sd">&quot;&quot;&quot;Number of base 10 digits to the right of the decimal place.&quot;&quot;&quot;</span>
+    <span class="n">is_initialized</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="sd">&quot;&quot;&quot;Is this mint initialized.&quot;&quot;&quot;</span>
+    <span class="n">freeze_authority</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">PublicKey</span><span class="p">]</span>
+    <span class="sd">&quot;&quot;&quot; Optional authority to freeze token accounts.&quot;&quot;&quot;</span></div>
+
+
+<div class="viewcode-block" id="Token"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token">[docs]</a><span class="k">class</span> <span class="nc">Token</span><span class="p">:</span>  <span class="c1"># pylint: disable=too-many-public-methods</span>
+    <span class="sd">&quot;&quot;&quot;An ERC20-like Token.&quot;&quot;&quot;</span>
+
+    <span class="n">pubkey</span><span class="p">:</span> <span class="n">PublicKey</span>
+    <span class="sd">&quot;&quot;&quot;The public key identifying this mint.&quot;&quot;&quot;</span>
+
+    <span class="n">program_id</span><span class="p">:</span> <span class="n">PublicKey</span>
+    <span class="sd">&quot;&quot;&quot;Program Identifier for the Token program.&quot;&quot;&quot;</span>
+
+    <span class="n">payer</span><span class="p">:</span> <span class="n">Account</span>
+    <span class="sd">&quot;&quot;&quot;Fee payer.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">conn</span><span class="p">:</span> <span class="n">Client</span><span class="p">,</span> <span class="n">pubkey</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span> <span class="n">program_id</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span> <span class="n">payer</span><span class="p">:</span> <span class="n">Account</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Initialize a client to a SPL-Token program.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_conn</span> <span class="o">=</span> <span class="n">conn</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pubkey</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">program_id</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">payer</span> <span class="o">=</span> <span class="n">pubkey</span><span class="p">,</span> <span class="n">program_id</span><span class="p">,</span> <span class="n">payer</span>
+
+<div class="viewcode-block" id="Token.get_min_balance_rent_for_exempt_for_account"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.get_min_balance_rent_for_exempt_for_account">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">get_min_balance_rent_for_exempt_for_account</span><span class="p">(</span><span class="n">conn</span><span class="p">:</span> <span class="n">Client</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Get the minimum balance for the account to be rent exempt.</span>
+
+<span class="sd">        :param conn: RPC connection to a solana cluster.</span>
+<span class="sd">        :return: Number of lamports required.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">resp</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">get_minimum_balance_for_rent_exemption</span><span class="p">(</span><span class="n">ACCOUNT_LAYOUT</span><span class="o">.</span><span class="n">sizeof</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">resp</span><span class="p">[</span><span class="s2">&quot;result&quot;</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="Token.get_min_balance_rent_for_exempt_for_mint"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.get_min_balance_rent_for_exempt_for_mint">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">get_min_balance_rent_for_exempt_for_mint</span><span class="p">(</span><span class="n">conn</span><span class="p">:</span> <span class="n">Client</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Get the minimum balance for the mint to be rent exempt.</span>
+
+<span class="sd">        :param conn: RPC connection to a solana cluster.</span>
+<span class="sd">        :return: Number of lamports required.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">resp</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">get_minimum_balance_for_rent_exemption</span><span class="p">(</span><span class="n">MINT_LAYOUT</span><span class="o">.</span><span class="n">sizeof</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">resp</span><span class="p">[</span><span class="s2">&quot;result&quot;</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="Token.get_min_balance_rent_for_exempt_for_multisig"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.get_min_balance_rent_for_exempt_for_multisig">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">get_min_balance_rent_for_exempt_for_multisig</span><span class="p">(</span><span class="n">conn</span><span class="p">:</span> <span class="n">Client</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Get the minimum balance for the multsig to be rent exempt.</span>
+
+<span class="sd">        :param conn: RPC connection to a solana cluster.</span>
+<span class="sd">        :return: Number of lamports required.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">resp</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">get_minimum_balance_for_rent_exemption</span><span class="p">(</span><span class="n">MULTISIG_LAYOUT</span><span class="o">.</span><span class="n">sizeof</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">resp</span><span class="p">[</span><span class="s2">&quot;result&quot;</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="Token.get_accounts"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.get_accounts">[docs]</a>    <span class="k">def</span> <span class="nf">get_accounts</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span> <span class="n">is_delegate</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">commitment</span><span class="p">:</span> <span class="n">Commitment</span> <span class="o">=</span> <span class="n">Single</span><span class="p">,</span> <span class="n">encoding</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;jsonParsed&quot;</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Get token accounts of the provided owner by the token&#39;s mint.</span>
+
+<span class="sd">        :param owner: Public Key of the token account owner.</span>
+<span class="sd">        :param is_delegate: (optional) Flag specifying if the `owner` public key is a delegate.</span>
+<span class="sd">        :param encoding: (optional) Encoding for Account data, either &quot;base58&quot; (slow), &quot;base64&quot; or jsonParsed&quot;.</span>
+<span class="sd">        :param commitment: (optional) Bank state to query.</span>
+
+<span class="sd">        Parsed-JSON encoding attempts to use program-specific state parsers to return more</span>
+<span class="sd">        human-readable and explicit account state data. If parsed-JSON is requested but a</span>
+<span class="sd">        valid mint cannot be found for a particular account, that account will be filtered out</span>
+<span class="sd">        from results. jsonParsed encoding is UNSTABLE.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_conn</span><span class="o">.</span><span class="n">get_token_accounts_by_delegate</span><span class="p">(</span>
+                <span class="n">owner</span><span class="p">,</span> <span class="n">TokenAccountOpts</span><span class="p">(</span><span class="n">mint</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">pubkey</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="n">encoding</span><span class="p">),</span> <span class="n">commitment</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">is_delegate</span>
+            <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_conn</span><span class="o">.</span><span class="n">get_token_accounts_by_owner</span><span class="p">(</span>
+                <span class="n">owner</span><span class="p">,</span> <span class="n">TokenAccountOpts</span><span class="p">(</span><span class="n">mint</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">pubkey</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="n">encoding</span><span class="p">),</span> <span class="n">commitment</span>
+            <span class="p">)</span>
+        <span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.get_balance"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.get_balance">[docs]</a>    <span class="k">def</span> <span class="nf">get_balance</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pubkey</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span> <span class="n">commitment</span><span class="p">:</span> <span class="n">Commitment</span> <span class="o">=</span> <span class="n">Single</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Get the balance of the provided token account.</span>
+
+<span class="sd">        :param pubkey: Public Key of the token account.</span>
+<span class="sd">        :param commitment: (optional) Bank state to query.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_conn</span><span class="o">.</span><span class="n">get_token_account_balance</span><span class="p">(</span><span class="n">pubkey</span><span class="p">,</span> <span class="n">commitment</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.create_mint"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.create_mint">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">create_mint</span><span class="p">(</span>
+        <span class="n">conn</span><span class="p">:</span> <span class="n">Client</span><span class="p">,</span>
+        <span class="n">payer</span><span class="p">:</span> <span class="n">Account</span><span class="p">,</span>
+        <span class="n">mint_authority</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">decimals</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">program_id</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">freeze_authority</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">PublicKey</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">skip_confirmation</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Token</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Create and initialize a token.</span>
+
+<span class="sd">        :param conn: RPC connection to a solana cluster.</span>
+<span class="sd">        :param payer: Fee payer for transaction.</span>
+<span class="sd">        :param mint_authority: Account or multisig that will control minting.</span>
+<span class="sd">        :param decimals: Location of the decimal place.</span>
+<span class="sd">        :param program_id: SPL Token program account.</span>
+<span class="sd">        :param freeze_authority: (optional) Account or multisig that can freeze token accounts.</span>
+<span class="sd">        :param skip_confirmation: (optional) Option to skip transaction confirmation.</span>
+<span class="sd">        :return: Token object for the newly minted token.</span>
+
+<span class="sd">        If skip confirmation is set to `False`, this method will block for at most 30 seconds</span>
+<span class="sd">        or until the transaction is confirmed.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">mint_account</span> <span class="o">=</span> <span class="n">Account</span><span class="p">()</span>
+        <span class="n">token</span> <span class="o">=</span> <span class="n">Token</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">mint_account</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="n">program_id</span><span class="p">,</span> <span class="n">payer</span><span class="p">)</span>
+        <span class="c1"># Allocate memory for the account</span>
+        <span class="n">balance_needed</span> <span class="o">=</span> <span class="n">Token</span><span class="o">.</span><span class="n">get_min_balance_rent_for_exempt_for_mint</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span>
+        <span class="c1"># Construct transaction</span>
+        <span class="n">txn</span> <span class="o">=</span> <span class="n">Transaction</span><span class="p">()</span>
+        <span class="n">txn</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+            <span class="n">sp</span><span class="o">.</span><span class="n">create_account</span><span class="p">(</span>
+                <span class="n">sp</span><span class="o">.</span><span class="n">CreateAccountParams</span><span class="p">(</span>
+                    <span class="n">from_pubkey</span><span class="o">=</span><span class="n">payer</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span>
+                    <span class="n">new_account_pubkey</span><span class="o">=</span><span class="n">mint_account</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span>
+                    <span class="n">lamports</span><span class="o">=</span><span class="n">balance_needed</span><span class="p">,</span>
+                    <span class="n">space</span><span class="o">=</span><span class="n">MINT_LAYOUT</span><span class="o">.</span><span class="n">sizeof</span><span class="p">(),</span>
+                    <span class="n">program_id</span><span class="o">=</span><span class="n">program_id</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">txn</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+            <span class="n">spl_token</span><span class="o">.</span><span class="n">initialize_mint</span><span class="p">(</span>
+                <span class="n">spl_token</span><span class="o">.</span><span class="n">InitializeMintParams</span><span class="p">(</span>
+                    <span class="n">program_id</span><span class="o">=</span><span class="n">program_id</span><span class="p">,</span>
+                    <span class="n">mint</span><span class="o">=</span><span class="n">mint_account</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span>
+                    <span class="n">decimals</span><span class="o">=</span><span class="n">decimals</span><span class="p">,</span>
+                    <span class="n">mint_authority</span><span class="o">=</span><span class="n">mint_authority</span><span class="p">,</span>
+                    <span class="n">freeze_authority</span><span class="o">=</span><span class="n">freeze_authority</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+        <span class="c1"># Send the two instructions</span>
+        <span class="n">conn</span><span class="o">.</span><span class="n">send_transaction</span><span class="p">(</span>
+            <span class="n">txn</span><span class="p">,</span> <span class="n">payer</span><span class="p">,</span> <span class="n">mint_account</span><span class="p">,</span> <span class="n">opts</span><span class="o">=</span><span class="n">TxOpts</span><span class="p">(</span><span class="n">skip_confirmation</span><span class="o">=</span><span class="n">skip_confirmation</span><span class="p">,</span> <span class="n">skip_preflight</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">token</span></div>
+
+<div class="viewcode-block" id="Token.create_account"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.create_account">[docs]</a>    <span class="k">def</span> <span class="nf">create_account</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">skip_confirmation</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">PublicKey</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Create and initialize a new account.</span>
+
+<span class="sd">        This account may then be used as a `transfer()` or `approve()` destination.</span>
+
+<span class="sd">        :param owner: User account that will own the new account.</span>
+<span class="sd">        :param skip_confirmation: (optional) Option to skip transaction confirmation.</span>
+<span class="sd">        :return: Public key of the new empty account.</span>
+
+<span class="sd">        If skip confirmation is set to `False`, this method will block for at most 30 seconds</span>
+<span class="sd">        or until the transaction is confirmed.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">new_account</span> <span class="o">=</span> <span class="n">Account</span><span class="p">()</span>
+        <span class="c1"># Allocate memory for the account</span>
+        <span class="n">balance_needed</span> <span class="o">=</span> <span class="n">Token</span><span class="o">.</span><span class="n">get_min_balance_rent_for_exempt_for_account</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_conn</span><span class="p">)</span>
+        <span class="c1"># Construct transaction</span>
+        <span class="n">txn</span> <span class="o">=</span> <span class="n">Transaction</span><span class="p">()</span>
+        <span class="n">txn</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+            <span class="n">sp</span><span class="o">.</span><span class="n">create_account</span><span class="p">(</span>
+                <span class="n">sp</span><span class="o">.</span><span class="n">CreateAccountParams</span><span class="p">(</span>
+                    <span class="n">from_pubkey</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">payer</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span>
+                    <span class="n">new_account_pubkey</span><span class="o">=</span><span class="n">new_account</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span>
+                    <span class="n">lamports</span><span class="o">=</span><span class="n">balance_needed</span><span class="p">,</span>
+                    <span class="n">space</span><span class="o">=</span><span class="n">ACCOUNT_LAYOUT</span><span class="o">.</span><span class="n">sizeof</span><span class="p">(),</span>
+                    <span class="n">program_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">program_id</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">txn</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+            <span class="n">spl_token</span><span class="o">.</span><span class="n">initialize_account</span><span class="p">(</span>
+                <span class="n">spl_token</span><span class="o">.</span><span class="n">InitializeAccountParams</span><span class="p">(</span>
+                    <span class="n">account</span><span class="o">=</span><span class="n">new_account</span><span class="o">.</span><span class="n">public_key</span><span class="p">(),</span> <span class="n">mint</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">pubkey</span><span class="p">,</span> <span class="n">owner</span><span class="o">=</span><span class="n">owner</span><span class="p">,</span> <span class="n">program_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">program_id</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+        <span class="c1"># Send the two instructions</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_conn</span><span class="o">.</span><span class="n">send_transaction</span><span class="p">(</span>
+            <span class="n">txn</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">payer</span><span class="p">,</span> <span class="n">new_account</span><span class="p">,</span> <span class="n">opts</span><span class="o">=</span><span class="n">TxOpts</span><span class="p">(</span><span class="n">skip_preflight</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">skip_confirmation</span><span class="o">=</span><span class="n">skip_confirmation</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">new_account</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Token.create_wrapped_native_account"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.create_wrapped_native_account">[docs]</a>    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">create_wrapped_native_account</span><span class="p">(</span>
+        <span class="n">conn</span><span class="p">:</span> <span class="n">Client</span><span class="p">,</span> <span class="n">program_id</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span> <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span> <span class="n">payer</span><span class="p">:</span> <span class="n">Account</span><span class="p">,</span> <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">PublicKey</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Create and initialize a new account on the special native token mint.</span>
+
+<span class="sd">        :param conn: RPC connection to a solana cluster.</span>
+<span class="sd">        :param program_id: SPL Token program account.</span>
+<span class="sd">        :param owner: The owner of the new token account.</span>
+<span class="sd">        :param payer: The source of the lamports to initialize, and payer of the initialization fees.</span>
+<span class="sd">        :param amount: The amount of lamports to wrap.</span>
+<span class="sd">        :return: The new token account.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;create_wrapped_native_account not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.create_multisig"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.create_multisig">[docs]</a>    <span class="k">def</span> <span class="nf">create_multisig</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">m</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">signers</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">PublicKey</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">PublicKey</span><span class="p">:</span>  <span class="c1"># pylint: disable=invalid-name</span>
+        <span class="sd">&quot;&quot;&quot;Create and initialize a new multisig.</span>
+
+<span class="sd">        :param m: Number of required signatures.</span>
+<span class="sd">        :param signers: Full set of signers.</span>
+<span class="sd">        :return: Public key of the new multisig account.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;create_multisig not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.get_mint_info"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.get_mint_info">[docs]</a>    <span class="k">def</span> <span class="nf">get_mint_info</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MintInfo</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Retrieve mint information.&quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;get_mint_info not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.get_account_info"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.get_account_info">[docs]</a>    <span class="k">def</span> <span class="nf">get_account_info</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AccountInfo</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Retrieve account information.&quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;get_account_info not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.transfer"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.transfer">[docs]</a>    <span class="k">def</span> <span class="nf">transfer</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">source</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">dest</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">owner</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Account</span><span class="p">,</span> <span class="n">PublicKey</span><span class="p">],</span>
+        <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Transfer tokens to another account.</span>
+
+<span class="sd">        :param source: Public key of account to transfer tokens from.</span>
+<span class="sd">        :param dest: Public key of account to transfer tokens to.</span>
+<span class="sd">        :param owner: Owner of the source account.</span>
+<span class="sd">        :param amount: Number of tokens to transfer.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">owner</span><span class="p">,</span> <span class="n">Account</span><span class="p">):</span>
+            <span class="n">owner_pubkey</span> <span class="o">=</span> <span class="n">owner</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+            <span class="n">signers</span> <span class="o">=</span> <span class="p">[</span><span class="n">owner</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">owner_pubkey</span> <span class="o">=</span> <span class="n">owner</span>
+            <span class="n">signers</span> <span class="o">=</span> <span class="n">multi_signers</span> <span class="k">if</span> <span class="n">multi_signers</span> <span class="k">else</span> <span class="p">[]</span>
+
+        <span class="n">txn</span> <span class="o">=</span> <span class="n">Transaction</span><span class="p">()</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+            <span class="n">spl_token</span><span class="o">.</span><span class="n">transfer</span><span class="p">(</span>
+                <span class="n">spl_token</span><span class="o">.</span><span class="n">TransferParams</span><span class="p">(</span>
+                    <span class="n">program_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">program_id</span><span class="p">,</span>
+                    <span class="n">source</span><span class="o">=</span><span class="n">source</span><span class="p">,</span>
+                    <span class="n">dest</span><span class="o">=</span><span class="n">dest</span><span class="p">,</span>
+                    <span class="n">owner</span><span class="o">=</span><span class="n">owner_pubkey</span><span class="p">,</span>
+                    <span class="n">amount</span><span class="o">=</span><span class="n">amount</span><span class="p">,</span>
+                    <span class="n">signers</span><span class="o">=</span><span class="p">[</span><span class="n">signer</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span> <span class="k">for</span> <span class="n">signer</span> <span class="ow">in</span> <span class="n">signers</span><span class="p">],</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_conn</span><span class="o">.</span><span class="n">send_transaction</span><span class="p">(</span><span class="n">txn</span><span class="p">,</span> <span class="o">*</span><span class="n">signers</span><span class="p">,</span> <span class="n">opts</span><span class="o">=</span><span class="n">opts</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.approve"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.approve">[docs]</a>    <span class="k">def</span> <span class="nf">approve</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">account</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">delegate</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Grant a third-party permission to transfer up the specified number of tokens from an account.</span>
+
+<span class="sd">        :param source: Public key of the source account.</span>
+<span class="sd">        :param delegate: Account authorized to perform a transfer tokens from the source account.</span>
+<span class="sd">        :param owner: Owner of the source account.</span>
+<span class="sd">        :param amount: Maximum number of tokens the delegate may transfer.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;approve not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.revoke"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.revoke">[docs]</a>    <span class="k">def</span> <span class="nf">revoke</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">account</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]],</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Remove approval for the transfer of any remaining tokens.</span>
+
+<span class="sd">        :param account:  Delegate account authorized to perform a transfer of tokens from the source account.</span>
+<span class="sd">        :param owner: Owner of the source account.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;revoke not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.set_authority"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.set_authority">[docs]</a>    <span class="k">def</span> <span class="nf">set_authority</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">account</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">current_authority</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">authority_type</span><span class="p">:</span> <span class="n">spl_token</span><span class="o">.</span><span class="n">AuthorityType</span><span class="p">,</span>
+        <span class="n">new_authority</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">PublicKey</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Assign a new authority to the account.</span>
+
+<span class="sd">        :param account: Public key of the token account.</span>
+<span class="sd">        :param current_authority: Current authority of the account.</span>
+<span class="sd">        :param authority_type: Type of authority to set.</span>
+<span class="sd">        :param new_authority: (optional) New authority of the account.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;set_authority not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.mint_to"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.mint_to">[docs]</a>    <span class="k">def</span> <span class="nf">mint_to</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">dest</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">mint_authority</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Account</span><span class="p">,</span> <span class="n">PublicKey</span><span class="p">],</span>
+        <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Mint new tokens.</span>
+
+<span class="sd">        :param dest: Public key of the account to mint to.</span>
+<span class="sd">        :param mint_authority: Public key of the minting authority.</span>
+<span class="sd">        :param amount: Amount to mint.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+
+<span class="sd">        If skip confirmation is set to `False`, this method will block for at most 30 seconds</span>
+<span class="sd">        or until the transaction is confirmed.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">mint_authority</span><span class="p">,</span> <span class="n">Account</span><span class="p">):</span>
+            <span class="n">owner_pubkey</span> <span class="o">=</span> <span class="n">mint_authority</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span>
+            <span class="n">signers</span> <span class="o">=</span> <span class="p">[</span><span class="n">mint_authority</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">owner_pubkey</span> <span class="o">=</span> <span class="n">mint_authority</span>
+            <span class="n">signers</span> <span class="o">=</span> <span class="n">multi_signers</span> <span class="k">if</span> <span class="n">multi_signers</span> <span class="k">else</span> <span class="p">[]</span>
+
+        <span class="n">txn</span> <span class="o">=</span> <span class="n">Transaction</span><span class="p">()</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+            <span class="n">spl_token</span><span class="o">.</span><span class="n">mint_to</span><span class="p">(</span>
+                <span class="n">spl_token</span><span class="o">.</span><span class="n">MintToParams</span><span class="p">(</span>
+                    <span class="n">program_id</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">program_id</span><span class="p">,</span>
+                    <span class="n">mint</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">pubkey</span><span class="p">,</span>
+                    <span class="n">dest</span><span class="o">=</span><span class="n">dest</span><span class="p">,</span>
+                    <span class="n">mint_authority</span><span class="o">=</span><span class="n">owner_pubkey</span><span class="p">,</span>
+                    <span class="n">amount</span><span class="o">=</span><span class="n">amount</span><span class="p">,</span>
+                    <span class="n">signers</span><span class="o">=</span><span class="p">[</span><span class="n">signer</span><span class="o">.</span><span class="n">public_key</span><span class="p">()</span> <span class="k">for</span> <span class="n">signer</span> <span class="ow">in</span> <span class="n">signers</span><span class="p">],</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_conn</span><span class="o">.</span><span class="n">send_transaction</span><span class="p">(</span><span class="n">txn</span><span class="p">,</span> <span class="o">*</span><span class="n">signers</span><span class="p">,</span> <span class="n">opts</span><span class="o">=</span><span class="n">opts</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.burn"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.burn">[docs]</a>    <span class="k">def</span> <span class="nf">burn</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">account</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Burn tokens.</span>
+
+<span class="sd">        :param account: Account to burn tokens from.</span>
+<span class="sd">        :param owner: Owner of the account.</span>
+<span class="sd">        :param amount: Amount to burn.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;burn not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.close_account"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.close_account">[docs]</a>    <span class="k">def</span> <span class="nf">close_account</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">account</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">dest</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">authority</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Remove approval for the transfer of any remaining tokens.</span>
+
+<span class="sd">        :param account: Account to close.</span>
+<span class="sd">        :param dest: Account to receive the remaining balance of the closed account.</span>
+<span class="sd">        :param authority: Authority which is allowed to close the account.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;close_account not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.freeze_account"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.freeze_account">[docs]</a>    <span class="k">def</span> <span class="nf">freeze_account</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">account</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span> <span class="n">authority</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span> <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Freeze account.</span>
+
+<span class="sd">        :param account: Account to freeze.</span>
+<span class="sd">        :param authority: The mint freeze authority.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;freeze_account not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.thaw_account"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.thaw_account">[docs]</a>    <span class="k">def</span> <span class="nf">thaw_account</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">account</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">authority</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Thaw account.</span>
+
+<span class="sd">        :param account: Account to thaw.</span>
+<span class="sd">        :param authority: The mint freeze authority.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;thaw_account not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.transfer2"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.transfer2">[docs]</a>    <span class="k">def</span> <span class="nf">transfer2</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">source</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">dest</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">decimals</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]],</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Transfer tokens to another account, asserting the token mint and decimals.</span>
+
+<span class="sd">        :param source: Public key of account to transfer tokens from.</span>
+<span class="sd">        :param dest: Public key of account to transfer tokens to.</span>
+<span class="sd">        :param owner: Owner of the source account.</span>
+<span class="sd">        :param amount: Number of tokens to transfer.</span>
+<span class="sd">        :param decimals: Number of decimals in transfer amount.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;transfer2 not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.approve2"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.approve2">[docs]</a>    <span class="k">def</span> <span class="nf">approve2</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">account</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">delegate</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">decimals</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Grant a third-party permission to transfer up the specified number of tokens from an account.</span>
+
+<span class="sd">        This method also asserts the token mint and decimals.</span>
+
+<span class="sd">        :param source: Public key of the source account.</span>
+<span class="sd">        :param delegate: Account authorized to perform a transfer tokens from the source account.</span>
+<span class="sd">        :param owner: Owner of the source account.</span>
+<span class="sd">        :param amount: Maximum number of tokens the delegate may transfer.</span>
+<span class="sd">        :param decimals: Number of decimals in approve amount.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;approve2 not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.mint_to2"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.mint_to2">[docs]</a>    <span class="k">def</span> <span class="nf">mint_to2</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">dest</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">mint_authority</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">decimals</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Mint new tokens, asserting the token mint and decimals.</span>
+
+<span class="sd">        :param dest: Public key of the account to mint to.</span>
+<span class="sd">        :param mint_authority: Public key of the minting authority.</span>
+<span class="sd">        :param amount: Amount to mint.</span>
+<span class="sd">        :param decimals: Number of decimals in amount to mint.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;mint_to2 not implemented&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Token.burn2"><a class="viewcode-back" href="../../../spl.html#spl.token.client.Token.burn2">[docs]</a>    <span class="k">def</span> <span class="nf">burn2</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">account</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">owner</span><span class="p">:</span> <span class="n">PublicKey</span><span class="p">,</span>
+        <span class="n">amount</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">decimals</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">multi_signers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Account</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">opts</span><span class="p">:</span> <span class="n">TxOpts</span> <span class="o">=</span> <span class="n">TxOpts</span><span class="p">(),</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RPCResponse</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Burn tokens, asserting the token mint and decimals.</span>
+
+<span class="sd">        :param account: Account to burn tokens from.</span>
+<span class="sd">        :param owner: Owner of the account.</span>
+<span class="sd">        :param amount: Amount to burn.</span>
+<span class="sd">        :param decimals: Number of decimals in amount to burn.</span>
+<span class="sd">        :param multi_signers: (optional) Signing accounts if `owner` is a multiSig.</span>
+<span class="sd">        :param opts: (optional) Transaction options.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;burn2 not implemented&quot;</span><span class="p">)</span></div></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">solana.py</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../solana.html">Solana</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">API Client</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html#module-solana.rpc.types">RPC Types</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html#module-solana.rpc.providers.base">RPC Providers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../spl.html">Solana Program Library (SPL)</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, Michael Huang.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.2.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
